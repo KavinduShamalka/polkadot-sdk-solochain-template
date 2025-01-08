@@ -4,7 +4,7 @@
 // distribute this software, either in source code form or as a compiled
 // binary, for any purpose, commercial or non-commercial, and by any
 // means.
-//
+
 // In jurisdictions that recognize copyright laws, the author or authors
 // of this software dedicate any and all copyright interest in the
 // software to the public domain. We make this dedication for the benefit
@@ -26,17 +26,30 @@
 // Substrate and Polkadot dependencies
 use frame_support::{
 	derive_impl, parameter_types,
-	traits::{ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, VariantCountOf},
+	traits::{ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, VariantCountOf, EitherOfDiverse, tokens::pay::PayAssetFromAccount, fungible::NativeOrWithId},
 	weights::{
 		constants::{RocksDbWeight, WEIGHT_REF_TIME_PER_SECOND},
 		IdentityFee, Weight,
-	},
+	}, PalletId,
 };
 use frame_system::limits::{BlockLength, BlockWeights};
 use pallet_transaction_payment::{ConstFeeMultiplier, FungibleAdapter, Multiplier};
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_runtime::{traits::One, Perbill};
+use sp_runtime::{traits::One, Perbill, Permill, Percent};
 use sp_version::RuntimeVersion;
+use frame_system::{EnsureWithSuccess, EnsureRoot};
+
+use crate::UNIT;
+use crate::Timestamp;
+use crate::Treasury;
+use crate::DAYS;
+use crate::ElectionProviderMultiPhase;
+use frame_election_provider_support::onchain;
+use crate::Indices;
+use crate::NominationPools;
+use crate::AssetRate;
+use crate::Bounties;
+use crate::Session;
 
 // Local module imports
 use super::{
@@ -59,6 +72,9 @@ parameter_types! {
 	pub RuntimeBlockLength: BlockLength = BlockLength::max_with_normal_ratio(5 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
 	pub const SS58Prefix: u8 = 42;
 }
+
+/// Upper limit on the number of NPOS nominations.
+const MAX_QUOTA_NOMINATIONS: u32 = 16;
 
 /// The default types are being injected by [`derive_impl`](`frame_support::derive_impl`) from
 /// [`SoloChainDefaultConfig`](`struct@frame_system::config_preludes::SolochainDefaultConfig`),
@@ -138,6 +154,24 @@ impl pallet_balances::Config for Runtime {
 
 parameter_types! {
 	pub FeeMultiplier: Multiplier = Multiplier::one();
+	pub const SessionsPerEra: sp_staking::SessionIndex = 6;
+	pub const BondingDuration: sp_staking::EraIndex = 24 * 28;
+	pub const SlashDeferDuration: sp_staking::EraIndex = 24 * 7; // 1/4 the bonding duration.
+	pub const MaxNominators: u32 = 64;
+	pub const MaxControllersInDeprecationBatch: u32 = 5900;
+	pub OffchainRepeat: BlockNumber = 5;
+	pub HistoryDepth: u32 = 84;
+	pub const SpendPeriod: BlockNumber = 1 * DAYS;
+	pub const Burn: Permill = Permill::from_percent(50);
+	pub const TipCountdown: BlockNumber = 1 * DAYS;
+	pub const TipFindersFee: Percent = Percent::from_percent(20);
+	pub const TipReportDepositBase: Balance = 1 * UNIT;
+	pub const DataDepositPerByte: Balance = 1 * UNIT;
+	pub const TreasuryPalletId: PalletId = PalletId(*b"py/trsry");
+	pub const MaximumReasonLength: u32 = 300;
+	pub const MaxApprovals: u32 = 100;
+	pub const MaxBalance: Balance = Balance::max_value();
+	pub const SpendPayoutPeriod: BlockNumber = 30 * DAYS;
 }
 
 impl pallet_transaction_payment::Config for Runtime {
@@ -164,4 +198,70 @@ impl pallet_template::Config for Runtime {
 impl pallet_stake::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_stake::weights::SubstrateWeight<Runtime>;
+}
+pub struct StakingBenchmarkingConfig;
+impl pallet_staking::BenchmarkingConfig for StakingBenchmarkingConfig {
+	type MaxNominators = ConstU32<1000>;
+	type MaxValidators = ConstU32<1000>;
+}
+
+impl <CouncilCollective, RewardCurve, OnChainSeqPhragmen>pallet_staking::Config for Runtime {
+		type Currency = Balances;
+		type CurrencyBalance = Balance;
+		type UnixTime = Timestamp;
+		type CurrencyToVote = sp_staking::currency_to_vote::U128CurrencyToVote;
+		type RewardRemainder = Treasury;
+		type RuntimeEvent = RuntimeEvent;
+		type Slash = Treasury; // send the slashed funds to the treasury.
+		type Reward = (); // rewards are minted from the void
+		type SessionsPerEra = SessionsPerEra;
+		type BondingDuration = BondingDuration;
+		type SlashDeferDuration = SlashDeferDuration;
+		/// A super-majority of the council can cancel the slash.
+		type AdminOrigin = EitherOfDiverse<
+			EnsureRoot<AccountId>,
+			pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 3, 4>,
+		>;
+		type SessionInterface = Self;
+		type EraPayout = pallet_staking::ConvertCurve<RewardCurve>;
+		type NextNewSession = Session;
+		type MaxExposurePageSize = ConstU32<256>;
+		type ElectionProvider = ElectionProviderMultiPhase;
+		type GenesisElectionProvider = onchain::OnChainExecution<OnChainSeqPhragmen>;
+		type VoterList = Self::VoterList;
+		type NominationsQuota = pallet_staking::FixedNominationsQuota<MAX_QUOTA_NOMINATIONS>;
+		// This a placeholder, to be introduced in the next PR as an instance of bags-list
+		type TargetList = pallet_staking::UseValidatorsMap<Self>;
+		type MaxUnlockingChunks = ConstU32<32>;
+		type MaxControllersInDeprecationBatch = MaxControllersInDeprecationBatch;
+		type HistoryDepth = HistoryDepth;
+		type EventListeners = NominationPools;
+		type WeightInfo = pallet_staking::weights::SubstrateWeight<Runtime>;
+		type BenchmarkingConfig = StakingBenchmarkingConfig;
+		type DisablingStrategy = pallet_staking::UpToLimitDisablingStrategy;
+}
+
+impl <CouncilCollective, TreasuryAccount, NativeAndAssets>pallet_treasury::Config for Runtime {
+	type AssetKind = NativeOrWithId<u32>;
+	type Beneficiary = AccountId;
+	type BeneficiaryLookup = Indices;
+	type Paymaster = PayAssetFromAccount<NativeAndAssets, TreasuryAccount>;
+	type BalanceConverter = AssetRate;
+	type PayoutPeriod = SpendPayoutPeriod;
+	type PalletId = TreasuryPalletId;
+	type Currency = Balances;
+	type RejectOrigin = EitherOfDiverse<
+		EnsureRoot<AccountId>,
+		pallet_collective::EnsureProportionMoreThan<AccountId, CouncilCollective, 1, 2>,
+	>;
+	type RuntimeEvent = RuntimeEvent;
+	type SpendPeriod = SpendPeriod;
+	type Burn = Burn;
+	type BurnDestination = ();
+	type SpendFunds = Bounties;
+	type WeightInfo = pallet_treasury::weights::SubstrateWeight<Runtime>;
+	type MaxApprovals = MaxApprovals;
+	type SpendOrigin = EnsureWithSuccess<EnsureRoot<AccountId>, AccountId, MaxBalance>;
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper = PalletTreasuryArguments;
 }

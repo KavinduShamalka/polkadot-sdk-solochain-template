@@ -224,4 +224,32 @@ mod runtime {
 
 	#[runtime::pallet_index(8)]
 	pub type StakeModule = pallet_stake;
+
+	#[runtime::pallet_index(9)]
+	pub type Staking = pallet_staking;
+
+	#[runtime::pallet_index(10)]
+	pub type Treasury = pallet_treasury;
+
+	#[runtime::pallet_index(11)]
+	pub type Collective = pallet_collective;
+
+	#[runtime::pallet_index(12)]
+	pub type ElectionProviderMultiPhase = pallet_election_provider_multi_phase;
+
+	#[runtime::pallet_index(13)]
+	pub type Indices = pallet_indices;
+
+	#[runtime::pallet_index(14)]
+	pub type NominationPools = pallet_nomination_pools;
+
+	#[runtime::pallet_index(15)]
+	pub type AssetRate = pallet_asset_rate;
+	
+	#[runtime::pallet_index(16)]
+	pub type Bounties = pallet_bounties;
+
+	#[runtime::pallet_index(17)]
+	pub type Session = pallet_session;
+	
 }
