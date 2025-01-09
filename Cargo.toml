@@ -16,6 +16,7 @@ resolver = "2"
 [workspace.dependencies]
 solochain-template-runtime = { path = "./runtime", default-features = false }
 pallet-template = { path = "./pallets/template", default-features = false }
+pallet-staking = { version = "38.0.0",  default-features = false }
 clap = { version = "4.5.10" }
 frame-benchmarking-cli = { version = "43.0.0", default-features = false }
 frame-metadata-hash-extension = { version = "0.6.0", default-features = false }
@@ -64,6 +65,7 @@ pallet-grandpa = { version = "38.0.0", default-features = false }
 pallet-sudo = { version = "38.0.0", default-features = false }
 pallet-timestamp = { version = "37.0.0", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "38.0.0", default-features = false }
+pallet-nomination-pools = { version = "36.0.0", default-features = false }
 scale-info = { version = "2.11.1", default-features = false }
 sp-genesis-builder = { version = "0.15.1", default-features = false }
 sp-offchain = { version = "34.0.0", default-features = false }
@@ -71,4 +73,6 @@ sp-session = { version = "36.0.0", default-features = false }
 sp-storage = { version = "21.0.0", default-features = false }
 sp-transaction-pool = { version = "34.0.0", default-features = false }
 sp-version = { version = "37.0.0", default-features = false }
+sp-staking = { version = "36.0.0", default-features = false }
 substrate-wasm-builder = { version = "24.0.1", default-features = false }
+pallet-bags-list = { version = "37.0.0", default-features = false }

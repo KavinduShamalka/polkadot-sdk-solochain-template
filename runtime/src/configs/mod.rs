@@ -37,6 +37,9 @@ use pallet_transaction_payment::{ConstFeeMultiplier, FungibleAdapter, Multiplier
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_runtime::{traits::One, Perbill};
 use sp_version::RuntimeVersion;
+use crate::Timestamp;
+use crate::VoterList;
+// use sp_runtime::curve::PiecewiseLinear;
 
 // Local module imports
 use super::{
@@ -160,3 +163,96 @@ impl pallet_template::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_template::weights::SubstrateWeight<Runtime>;
 }
+
+// pallet_staking_reward_curve::build! {
+// 	const REWARD_CURVE: PiecewiseLinear<'static> = curve!(
+// 		min_inflation: 0_025_000,
+// 		max_inflation: 0_100_000,
+// 		ideal_stake: 0_500_000,
+// 		falloff: 0_050_000,
+// 		max_piece_count: 40,
+// 		test_precision: 0_005_000,
+// 	);
+// }
+
+pub struct StakingBenchmarkingConfig;
+impl pallet_staking::BenchmarkingConfig for StakingBenchmarkingConfig {
+	type MaxNominators = ConstU32<1000>;
+	type MaxValidators = ConstU32<1000>;
+}
+
+const MAX_QUOTA_NOMINATIONS: u32 = 16;
+
+parameter_types! {
+	pub const MaxNominators: u32 = 64;
+	pub const MaxControllersInDeprecationBatch: u32 = 5900;
+	pub OffchainRepeat: BlockNumber = 5;
+	pub HistoryDepth: u32 = 84;
+	pub const SlashDeferDuration: sp_staking::EraIndex = 24 * 7;
+	pub const SessionsPerEra: sp_staking::SessionIndex = 6;
+	pub const BondingDuration: sp_staking::EraIndex = 24 * 28;
+	// pub const RewardCurve: &'static PiecewiseLinear<'static> = &REWARD_CURVE;
+}
+
+
+impl pallet_staking::Config for Runtime {
+
+	type Currency = Balances;
+
+	type CurrencyBalance = Balance;	
+
+	type UnixTime = Timestamp;
+
+	type CurrencyToVote = sp_staking::currency_to_vote::U128CurrencyToVote;
+
+	type EventListeners = ();
+
+	type BenchmarkingConfig = StakingBenchmarkingConfig;
+
+	type WeightInfo =  pallet_staking::weights::SubstrateWeight<Runtime>;
+
+	type HistoryDepth = HistoryDepth;
+
+	type MaxControllersInDeprecationBatch = MaxControllersInDeprecationBatch;
+
+	type MaxUnlockingChunks = ConstU32<32>;
+
+	type TargetList  = pallet_staking::UseValidatorsMap<Self>;
+
+	type NominationsQuota = pallet_staking::FixedNominationsQuota<{MAX_QUOTA_NOMINATIONS}>;
+
+	type MaxExposurePageSize  = ConstU32<256>;
+
+	type SlashDeferDuration = SlashDeferDuration;
+
+	type SessionsPerEra = SessionsPerEra;
+
+	type BondingDuration = BondingDuration;
+
+	type EraPayout = ();
+
+	type NextNewSession = ();
+
+	type SessionInterface =();
+
+	type Reward = ();
+
+	type RewardRemainder = ();
+
+	type Slash = ();
+
+	type ElectionProvider;
+	
+	type GenesisElectionProvider;
+
+	type RuntimeEvent = RuntimeEvent;
+
+	type AdminOrigin;
+
+	type VoterList = VoterList;
+
+	type DisablingStrategy = pallet_staking::UpToLimitDisablingStrategy;
+
+}
+
+

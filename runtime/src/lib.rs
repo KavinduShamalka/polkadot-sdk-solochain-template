@@ -221,4 +221,11 @@ mod runtime {
 	// Include the custom logic from the pallet-template in the runtime.
 	#[runtime::pallet_index(7)]
 	pub type TemplateModule = pallet_template;
+
+	// Include the custom logic from the pallet-template in the runtime.
+	#[runtime::pallet_index(8)]
+	pub type Staking = pallet_staking;
+
+	// #[runtime::pallet_index(9)]
+	// pub type VoterList = pallet_bags_list;
 }
