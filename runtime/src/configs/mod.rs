@@ -24,6 +24,9 @@
 // For more information, please refer to <http://unlicense.org>
 
 // Substrate and Polkadot dependencies
+
+// mod voter_bags;
+
 use frame_support::{
 	derive_impl, parameter_types,
 	traits::{ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, VariantCountOf},
@@ -32,13 +35,20 @@ use frame_support::{
 		IdentityFee, Weight,
 	},
 };
+use frame_election_provider_support::{
+	bounds::{ElectionBounds, ElectionBoundsBuilder},
+	onchain, BalancingConfig, ElectionDataProvider, SequentialPhragmen, VoteWeight,
+};
 use frame_system::limits::{BlockLength, BlockWeights};
 use pallet_transaction_payment::{ConstFeeMultiplier, FungibleAdapter, Multiplier};
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_runtime::{traits::One, Perbill};
 use sp_version::RuntimeVersion;
 use crate::Timestamp;
-use crate::VoterList;
+use crate::Staking;
+use frame_election_provider_support::SortedListProvider;
+use frame_system::pallet_prelude::BlockNumberFor;
+use frame_election_provider_support::NoElection;
 // use sp_runtime::curve::PiecewiseLinear;
 
 // Local module imports
@@ -192,6 +202,7 @@ parameter_types! {
 	pub const SessionsPerEra: sp_staking::SessionIndex = 6;
 	pub const BondingDuration: sp_staking::EraIndex = 24 * 28;
 	// pub const RewardCurve: &'static PiecewiseLinear<'static> = &REWARD_CURVE;
+	pub const MaxWinners: u32 = 1000;
 }
 
 
@@ -241,18 +252,32 @@ impl pallet_staking::Config for Runtime {
 
 	type Slash = ();
 
-	type ElectionProvider;
-	
-	type GenesisElectionProvider;
-
 	type RuntimeEvent = RuntimeEvent;
 
-	type AdminOrigin;
-
-	type VoterList = VoterList;
-
 	type DisablingStrategy = pallet_staking::UpToLimitDisablingStrategy;
+
+	type AdminOrigin = frame_system::EnsureRoot<Self::AccountId>;
+
+	type GenesisElectionProvider = NoElection<(Self::AccountId, BlockNumberFor<Self>, pallet_staking::Pallet<Self>, MaxWinners,)>;
+
+	type ElectionProvider = NoElection<(Self::AccountId, BlockNumberFor<Self>, pallet_staking::Pallet<Self>, MaxWinners,)>;
+
+	type VoterList = pallet_staking::UseNominatorsAndValidatorsMap<Self>;
 
 }
 
 
+// parameter_types! {
+// 	pub const BagThresholds: &'static [u64] = &voter_bags::THRESHOLDS;
+// }
+
+// type VoterBagsListInstance = pallet_bags_list::Instance1;
+// impl pallet_bags_list::Config<VoterBagsListInstance> for Runtime {
+// 	type RuntimeEvent = RuntimeEvent;
+// 	/// The voter bags-list is loosely kept up to date, and the real source of truth for the score
+// 	/// of each node is the staking pallet.
+// 	type ScoreProvider = Staking;
+// 	type BagThresholds = BagThresholds;
+// 	type Score = VoteWeight;
+// 	type WeightInfo = pallet_bags_list::weights::SubstrateWeight<Runtime>;
+// }

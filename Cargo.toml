@@ -59,6 +59,7 @@ frame-support = { version = "38.0.0", default-features = false }
 frame-system-benchmarking = { version = "38.0.0", default-features = false }
 frame-system-rpc-runtime-api = { version = "34.0.0", default-features = false }
 frame-try-runtime = { version = "0.44.0", default-features = false }
+frame-election-provider-support = { version = "38.0.0", default-features = false }
 pallet-aura = { version = "37.0.0", default-features = false }
 pallet-balances = { version = "39.0.0", default-features = false }
 pallet-grandpa = { version = "38.0.0", default-features = false }
@@ -66,6 +67,8 @@ pallet-sudo = { version = "38.0.0", default-features = false }
 pallet-timestamp = { version = "37.0.0", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "38.0.0", default-features = false }
 pallet-nomination-pools = { version = "36.0.0", default-features = false }
+pallet-election-provider-multi-phase = { version = "37.0.0", default-features = false }
+pallet-bags-list = { version = "36.0.0", default-features = false }
 scale-info = { version = "2.11.1", default-features = false }
 sp-genesis-builder = { version = "0.15.1", default-features = false }
 sp-offchain = { version = "34.0.0", default-features = false }
@@ -75,4 +78,3 @@ sp-transaction-pool = { version = "34.0.0", default-features = false }
 sp-version = { version = "37.0.0", default-features = false }
 sp-staking = { version = "36.0.0", default-features = false }
 substrate-wasm-builder = { version = "24.0.1", default-features = false }
-pallet-bags-list = { version = "37.0.0", default-features = false }
