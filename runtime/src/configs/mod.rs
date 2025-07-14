@@ -162,3 +162,10 @@ impl pallet_template::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_template::weights::SubstrateWeight<Runtime>;
 }
+
+
+/// Configure the pallet-template in pallets/template.
+impl pallet_test::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = pallet_test::weights::SubstrateWeight<Runtime>;
+}
