@@ -67,7 +67,8 @@ pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-
+	use scale_info::prelude::vec::Vec;
+	
 	// The `Pallet` struct serves as a placeholder to implement traits, methods and dispatchables
 	// (`Call`s) in this pallet.
 	#[pallet::pallet]
@@ -80,11 +81,28 @@ pub mod pallet {
 	/// `runtime/src/lib.rs` file of your chain.
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
+
+	    /// Maximum length (in bytes) for first & last name.
+        #[pallet::constant]
+        type MaxNameLength: Get<u32>;
+
 		/// The overarching runtime event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
 		/// A type representing the weights required by the dispatchables of this pallet.
 		type WeightInfo: WeightInfo;
 	}
+
+	/// A `String`-like bounded byte vector capped at MaxNameLength
+    pub type BoundedString<T> = BoundedVec<u8, <T as Config>::MaxNameLength>;
+
+	#[derive(Encode, Decode, TypeInfo, MaxEncodedLen)]
+	#[scale_info(skip_type_params(T))]
+    pub struct Profile<T: Config> {
+        pub first: BoundedString<T>,
+        pub last:  BoundedString<T>,
+        pub owner: T::AccountId,
+    }
 
 	/// A storage item for this pallet.
 	///
@@ -92,6 +110,10 @@ pub mod pallet {
 	/// `u32` value. Learn more about runtime storage here: <https://docs.substrate.io/build/runtime-storage/>
 	#[pallet::storage]
 	pub type Something<T> = StorageValue<_, u32>;
+
+    /// Storage map to track the number of interactions performed by each account.
+    #[pallet::storage]
+    pub type ProfileStorage<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, Profile<T>>;
 
 	/// Events that functions in this pallet can emit.
 	///
@@ -113,6 +135,10 @@ pub mod pallet {
 			/// The account who set the new value.
 			who: T::AccountId,
 		},
+		/// A profile was set or updated: [account]
+        ProfileSet(T::AccountId),
+        /// A profile was fetched by user: [account, first, last]
+        ProfileFetched(T::AccountId, BoundedString<T>, BoundedString<T>),
 	}
 
 	/// Errors that can be returned by this pallet.
@@ -129,6 +155,10 @@ pub mod pallet {
 		NoneValue,
 		/// There was an attempt to increment the value in storage over `u32::MAX`.
 		StorageOverflow,
+	    /// The provided name exceeds the maximum length
+        NameTooLong,
+        /// Profile not found for given account
+        ProfileNotFound,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -198,5 +228,44 @@ pub mod pallet {
 				},
 			}
 		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(T::WeightInfo::create_user_profile())]
+		pub fn create_user_profile(origin: OriginFor<T>, first: Vec<u8>, last: Vec<u8>,) -> DispatchResult {
+			// Check that the extrinsic was signed and get the signer.
+			let who = ensure_signed(origin)?;
+
+			let first_bounded: BoundedString<T> =
+                first.try_into().map_err(|_| Error::<T>::NameTooLong)?;
+            let last_bounded: BoundedString<T> =
+                last.try_into().map_err(|_| Error::<T>::NameTooLong)?;
+
+			// Update storage.
+            let profile = Profile {
+                first: first_bounded.clone(),
+                last: last_bounded.clone(),
+                owner: who.clone(),
+            };
+
+            <ProfileStorage<T>>::insert(&who, profile);
+            Self::deposit_event(Event::ProfileSet(who));
+            Ok(())
+		}
+
+		#[pallet::call_index(3)]
+		#[pallet::weight(T::WeightInfo::get_profile())]
+        pub fn get_profile(
+            origin: OriginFor<T>,
+        ) -> DispatchResultWithPostInfo {
+            let who = ensure_signed(origin)?;
+            let profile = <ProfileStorage<T>>::get(&who).ok_or(Error::<T>::ProfileNotFound)?;
+
+            Self::deposit_event(Event::ProfileFetched(
+                who,
+                profile.first.clone(),
+                profile.last.clone(),
+            ));
+            Ok(().into())
+        }
 	}
 }

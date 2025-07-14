@@ -27,7 +27,7 @@ mod runtime {
 	pub type System = frame_system::Pallet<Test>;
 
 	#[runtime::pallet_index(1)]
-	pub type Test_temp = pallet_test::Pallet<Test>;
+	pub type TestPallet = pallet_test::Pallet<Test>;
 	
 }
 
@@ -39,6 +39,7 @@ impl frame_system::Config for Test {
 impl pallet_test::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
+	type MaxNameLength = ();
 }
 
 // Build genesis storage according to the mock runtime.
