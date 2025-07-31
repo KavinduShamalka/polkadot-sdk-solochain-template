@@ -225,4 +225,8 @@ mod runtime {
 	// Include the custom logic from the pallet-template in the runtime.
 	#[runtime::pallet_index(7)]
 	pub type Template = pallet_template;
+
+    // Add the Member pallet
+    #[runtime::pallet_index(8)] // Use next available index after your existing pallets
+    pub type Member = pallet_member;
 }

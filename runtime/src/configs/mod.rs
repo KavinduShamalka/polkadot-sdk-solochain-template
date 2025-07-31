@@ -162,3 +162,24 @@ impl pallet_template::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_template::weights::SubstrateWeight<Runtime>;
 }
+
+// Member Pallet Configuration Parameters
+parameter_types! {
+    pub const MaxFirstNameLength: u32 = 50;
+    pub const MaxLastNameLength: u32 = 50; 
+    pub const MaxEmailLength: u32 = 100;
+    pub const MaxAddressLength: u32 = 200;
+    pub const MaxMobileLength: u32 = 20;
+}
+
+
+/// Configure the member pallet
+impl pallet_member::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type WeightInfo = pallet_member::weights::SubstrateWeight<Runtime>;
+    type MaxFirstNameLength = MaxFirstNameLength;
+    type MaxLastNameLength = MaxLastNameLength;
+    type MaxEmailLength = MaxEmailLength;
+    type MaxAddressLength = MaxAddressLength;
+    type MaxMobileLength = MaxMobileLength;
+}
