@@ -117,7 +117,7 @@ pub mod pallet {
     pub type MemberUuid = H256;
 
     /// KYC Status enumeration
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking)]
     pub enum KycStatus {
         Unapproved,
         Approved,
@@ -130,11 +130,28 @@ pub mod pallet {
         }
     }
 
+
+    /// MemberType enumeration
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking)]
+    pub enum MemberType {
+        UniversityStudent,
+        SchoolStudent,
+        Professional,
+        General,
+    }
+
+    impl Default for MemberType {
+        fn default() -> Self {
+            MemberType::General
+        }
+    }
+
 	#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
     #[scale_info(skip_type_params(T))]
     pub struct Member<T: Config> {
         /// Unique member identifier
         pub member_id: MemberUuid,
+        pub member_type: MemberType,
         
         /// Personal Information
         pub first_name: BoundedVec<u8, T::MaxFirstNameLength>,
@@ -264,6 +281,7 @@ pub mod pallet {
 		MemberDataRetrieved {
 			member_id: MemberUuid,
 			accessed_by: T::AccountId,
+            member_type: MemberType,
 			// Member data as separate fields (this avoids trait bound issues)
 			first_name: BoundedVec<u8, T::MaxFirstNameLength>,
 			last_name: BoundedVec<u8, T::MaxLastNameLength>,
@@ -272,6 +290,7 @@ pub mod pallet {
 			address: BoundedVec<u8, T::MaxAddressLength>,
 			mobile: BoundedVec<u8, T::MaxMobileLength>,
 			photo_hash: Option<H256>,
+            kyc_status: KycStatus,
 			kyc_hash: Option<H256>,
 			created_at: u64,
 			updated_at: u64,
@@ -437,6 +456,7 @@ pub mod pallet {
             // Create member profile
             let member = Member {
                 member_id,
+                member_type: MemberType::General,
                 first_name: bounded_first_name,
                 last_name: bounded_last_name,
                 date_of_birth,
@@ -502,6 +522,7 @@ pub mod pallet {
 			Self::deposit_event(Event::MemberDataRetrieved {
 				member_id,
 				accessed_by: who,
+                member_type: member.member_type,
 				first_name: member.first_name,
 				last_name: member.last_name,
 				date_of_birth: member.date_of_birth,
@@ -509,6 +530,7 @@ pub mod pallet {
 				address: member.address,
 				mobile: member.mobile,
 				photo_hash: member.photo_hash,
+                kyc_status: member.kyc_status,
 				kyc_hash: member.kyc_hash,
 				created_at: member.created_at,
 				updated_at: member.updated_at,
