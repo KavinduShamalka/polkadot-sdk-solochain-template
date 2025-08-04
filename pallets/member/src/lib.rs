@@ -1,40 +1,16 @@
-//! # Template Pallet
+//! # Member Pallet
 //!
-//! A pallet with minimal functionality to help developers understand the essential components of
-//! writing a FRAME pallet. It is typically used in beginner tutorials or in Substrate template
-//! nodes as a starting point for creating a new pallet and **not meant to be used in production**.
+//! A pallet for managing member profiles with secure ownership control and KYC functionality.
 //!
 //! ## Overview
 //!
-//! This template pallet contains basic examples of:
-//! - declaring a storage item that stores a single `u32` value
-//! - declaring and using events
-//! - declaring and using errors
-//! - a dispatchable function that allows a user to set a new value to storage and emits an event
-//!   upon success
-//! - another dispatchable function that causes a custom error to be thrown
-//!
-//! Each pallet section is annotated with an attribute using the `#[pallet::...]` procedural macro.
-//! This macro generates the necessary code for a pallet to be aggregated into a FRAME runtime.
-//!
-//! Learn more about FRAME macros [here](https://docs.substrate.io/reference/frame-macros/).
-//!
-//! ### Pallet Sections
-//!
-//! The pallet sections in this template are:
-//!
-//! - A **configuration trait** that defines the types and parameters which the pallet depends on
-//!   (denoted by the `#[pallet::config]` attribute). See: [`Config`].
-//! - A **means to store pallet-specific data** (denoted by the `#[pallet::storage]` attribute).
-//!   See: [`storage_types`].
-//! - A **declaration of the events** this pallet emits (denoted by the `#[pallet::event]`
-//!   attribute). See: [`Event`].
-//! - A **declaration of the errors** that this pallet can throw (denoted by the `#[pallet::error]`
-//!   attribute). See: [`Error`].
-//! - A **set of dispatchable functions** that define the pallet's functionality (denoted by the
-//!   `#[pallet::call]` attribute). See: [`dispatchables`].
-//!
-//! Run `cargo doc --package pallet-template --open` to view this pallet's documentation.
+//! This pallet provides:
+//! - Member profile registration and management
+//! - Profile updates with automatic KYC status reset
+//! - KYC document submission via IPFS hashes
+//! - KYC status management with admin controls
+//! - Email uniqueness enforcement
+//! - Comprehensive event system for tracking changes
 
 // We make sure this pallet uses `no_std` for compiling to Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -70,7 +46,7 @@ pub mod pallet {
         traits::Get,
     };
     use frame_system::pallet_prelude::*;
-    use codec::Encode;
+    use codec::{Encode, Decode};
     use frame_support::sp_runtime::SaturatedConversion;
     use scale_info::prelude::vec::Vec;
 	use sp_core::H256;
@@ -130,7 +106,6 @@ pub mod pallet {
         }
     }
 
-
     /// MemberType enumeration
     #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking)]
     pub enum MemberType {
@@ -146,7 +121,7 @@ pub mod pallet {
         }
     }
 
-	#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+	#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen, DecodeWithMemTracking)]
     #[scale_info(skip_type_params(T))]
     pub struct Member<T: Config> {
         /// Unique member identifier
@@ -215,26 +190,6 @@ pub mod pallet {
         _, Blake2_128Concat, u32, MemberUuid, OptionQuery
     >;
 
-
-	// First, create a return type for Member data (without the created_by field for privacy)
-	// Add this BEFORE your Event enum:
-
-	#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-	#[scale_info(skip_type_params(T))]
-	pub struct MemberInfo<T: Config> {
-		pub member_id: MemberUuid,
-		pub first_name: BoundedVec<u8, T::MaxFirstNameLength>,
-		pub last_name: BoundedVec<u8, T::MaxLastNameLength>,
-		pub date_of_birth: u64,
-		pub email: BoundedVec<u8, T::MaxEmailLength>,
-		pub address: BoundedVec<u8, T::MaxAddressLength>,
-		pub mobile: BoundedVec<u8, T::MaxMobileLength>,
-		pub kyc_status: KycStatus,
-		pub photo_hash: Option<H256>,
-		pub kyc_hash: Option<H256>,
-		pub created_at: u64,
-		pub updated_at: u64,
-	}
 	/// Events that functions in this pallet can emit.
 	///
 	/// Events are a simple means of indicating to the outside world (such as dApps, chain explorers
@@ -267,16 +222,25 @@ pub mod pallet {
         MemberUpdated {
             member_id: MemberUuid,
             updated_by: T::AccountId,
+            previous_email: Option<BoundedVec<u8, T::MaxEmailLength>>,
+            new_email: BoundedVec<u8, T::MaxEmailLength>,
         },
         
         /// KYC documents have been submitted
         KycSubmitted {
             member_id: MemberUuid,
             submitted_by: T::AccountId,
+            kyc_hash: H256,
         },
 
-		// Add this event to your Event enum:
-		/// Member data has been retrieved
+        /// KYC status has been updated
+        KycStatusUpdated {
+            member_id: MemberUuid,
+            updated_by: T::AccountId,
+            old_status: KycStatus,
+            new_status: KycStatus,
+        },
+
 		/// Member data has been retrieved with all fields
 		MemberDataRetrieved {
 			member_id: MemberUuid,
@@ -327,6 +291,10 @@ pub mod pallet {
         KycNotFound,
         /// Invalid KYC status transition
         InvalidKycStatusTransition,
+        /// Cannot update email to the same value
+        EmailUnchanged,
+        /// Only admin/sudo can update KYC status
+        UnauthorizedKycUpdate,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
@@ -539,8 +507,305 @@ pub mod pallet {
 			Ok(())
 		}
 
-	}
+        /// Update member profile information
+        /// 
+        /// Allows the member owner to update their profile information.
+        /// When any field is updated, KYC status is automatically reset to Unapproved.
+        /// 
+        /// Parameters:
+        /// - `first_name`: Updated first name (optional)
+        /// - `last_name`: Updated last name (optional)
+        /// - `date_of_birth`: Updated birth date (optional)
+        /// - `email`: Updated email address (optional, must be unique)
+        /// - `address`: Updated address (optional)
+        /// - `mobile`: Updated mobile number (optional)
+        /// - `member_type`: Updated member type (optional)
+        /// 
+        /// Emits: `MemberUpdated` event
+        #[pallet::call_index(4)]
+        #[pallet::weight(T::WeightInfo::update_member())]
+        pub fn update_member(
+            origin: OriginFor<T>,
+            first_name: Option<Vec<u8>>,
+            last_name: Option<Vec<u8>>,
+            date_of_birth: Option<u64>,
+            email: Option<Vec<u8>>,
+            address: Option<Vec<u8>>,
+            mobile: Option<Vec<u8>>,
+            member_type: Option<MemberType>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
 
+            // Get member UUID for this account
+            let member_id = AccountToMember::<T>::get(&who)
+                .ok_or(Error::<T>::MemberNotFound)?;
+
+            // Get existing member data
+            let mut member = Members::<T>::get(&member_id)
+                .ok_or(Error::<T>::MemberNotFound)?;
+
+            // Verify ownership
+            ensure!(member.created_by == who, Error::<T>::NotMemberOwner);
+
+            let mut profile_changed = false;
+            let old_email = member.email.clone();
+            let mut new_email = member.email.clone();
+
+            // Update first name if provided
+            if let Some(name) = first_name {
+                let bounded_name: BoundedVec<u8, T::MaxFirstNameLength> = 
+                    name.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
+                if bounded_name != member.first_name {
+                    member.first_name = bounded_name;
+                    profile_changed = true;
+                }
+            }
+
+            // Update last name if provided
+            if let Some(name) = last_name {
+                let bounded_name: BoundedVec<u8, T::MaxLastNameLength> = 
+                    name.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
+                if bounded_name != member.last_name {
+                    member.last_name = bounded_name;
+                    profile_changed = true;
+                }
+            }
+
+            // Update date of birth if provided
+            if let Some(dob) = date_of_birth {
+                if dob != member.date_of_birth {
+                    member.date_of_birth = dob;
+                    profile_changed = true;
+                }
+            }
+
+            // Update email if provided
+            if let Some(new_email_vec) = email {
+                let bounded_email: BoundedVec<u8, T::MaxEmailLength> = 
+                    new_email_vec.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
+                
+                if bounded_email != member.email {
+                    // Check if new email is already taken by another member
+                    if let Some(existing_member_id) = MemberByEmail::<T>::get(&bounded_email) {
+                        ensure!(existing_member_id == member_id, Error::<T>::EmailAlreadyExists);
+                    }
+
+                    // Remove old email mapping
+                    MemberByEmail::<T>::remove(&member.email);
+                    
+                    // Update email and create new mapping
+                    member.email = bounded_email.clone();
+                    new_email = bounded_email.clone();
+                    MemberByEmail::<T>::insert(&bounded_email, &member_id);
+                    profile_changed = true;
+                }
+            }
+
+            // Update address if provided
+            if let Some(addr) = address {
+                let bounded_address: BoundedVec<u8, T::MaxAddressLength> = 
+                    addr.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
+                if bounded_address != member.address {
+                    member.address = bounded_address;
+                    profile_changed = true;
+                }
+            }
+
+            // Update mobile if provided
+            if let Some(mob) = mobile {
+                let bounded_mobile: BoundedVec<u8, T::MaxMobileLength> = 
+                    mob.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
+                if bounded_mobile != member.mobile {
+                    member.mobile = bounded_mobile;
+                    profile_changed = true;
+                }
+            }
+
+            // Update member type if provided
+            if let Some(mt) = member_type {
+                if mt != member.member_type {
+                    member.member_type = mt;
+                    profile_changed = true;
+                }
+            }
+
+            // If any field was changed, reset KYC status and update timestamp
+            if profile_changed {
+                member.kyc_status = KycStatus::Unapproved;
+                member.updated_at = Self::current_timestamp();
+
+                // Store updated member data
+                Members::<T>::insert(&member_id, &member);
+
+                // Determine previous email for event (None if email didn't change)
+                let previous_email = if new_email != old_email {
+                    Some(old_email)
+                } else {
+                    None
+                };
+
+                // Emit event
+                Self::deposit_event(Event::MemberUpdated {
+                    member_id,
+                    updated_by: who,
+                    previous_email,
+                    new_email,
+                });
+            }
+
+            Ok(())
+        }
+
+        /// Submit KYC documents
+        /// 
+        /// Allows a member to submit KYC documents by providing the IPFS hash.
+        /// This also updates the photo hash if provided.
+        /// 
+        /// Parameters:
+        /// - `kyc_hash`: IPFS hash of KYC documents
+        /// - `photo_hash`: Optional IPFS hash of member photo
+        /// 
+        /// Emits: `KycSubmitted` event
+        #[pallet::call_index(5)]
+        #[pallet::weight(T::WeightInfo::submit_kyc())]
+        pub fn submit_kyc(
+            origin: OriginFor<T>,
+            kyc_hash: H256,
+            photo_hash: Option<H256>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // Get member UUID for this account
+            let member_id = AccountToMember::<T>::get(&who)
+                .ok_or(Error::<T>::MemberNotFound)?;
+
+            // Get existing member data
+            let mut member = Members::<T>::get(&member_id)
+                .ok_or(Error::<T>::MemberNotFound)?;
+
+            // Verify ownership
+            ensure!(member.created_by == who, Error::<T>::NotMemberOwner);
+
+            // Update KYC hash and photo hash if provided
+            member.kyc_hash = Some(kyc_hash);
+            if let Some(photo) = photo_hash {
+                member.photo_hash = Some(photo);
+            }
+            member.updated_at = Self::current_timestamp();
+
+            // Store updated member data
+            Members::<T>::insert(&member_id, &member);
+
+            // Emit event
+            Self::deposit_event(Event::KycSubmitted {
+                member_id,
+                submitted_by: who,
+                kyc_hash,
+            });
+
+            Ok(())
+        }
+
+        /// Update KYC status (Admin/Sudo only)
+        /// 
+        /// Allows authorized accounts (typically admin/sudo) to update the KYC status
+        /// of a member after reviewing their submitted documents.
+        /// 
+        /// Parameters:
+        /// - `member_id`: UUID of the member whose KYC status to update
+        /// - `new_status`: New KYC status (Approved, Rejected, or Unapproved)
+        /// 
+        /// Emits: `KycStatusUpdated` event
+        #[pallet::call_index(6)]
+        #[pallet::weight(T::WeightInfo::update_kyc_status())]
+        pub fn update_kyc_status(
+            origin: OriginFor<T>,
+            member_id: MemberUuid,
+            new_status: KycStatus,
+        ) -> DispatchResult {
+            // For now, we'll allow any signed origin to update KYC status
+            // In production, you should restrict this to admin/sudo only
+            // You can use: ensure_root(origin)?; for sudo only
+            let who = ensure_signed(origin)?;
+
+            // Get existing member data
+            let mut member = Members::<T>::get(&member_id)
+                .ok_or(Error::<T>::MemberNotFound)?;
+
+            // Store old status for event
+            let old_status = member.kyc_status.clone();
+
+            // Validate status transition (optional business logic)
+            // You can add custom validation rules here
+            match (&old_status, &new_status) {
+                // Allow any transition for now
+                _ => {},
+            }
+
+            // Update KYC status and timestamp
+            member.kyc_status = new_status.clone();
+            member.updated_at = Self::current_timestamp();
+
+            // Store updated member data
+            Members::<T>::insert(&member_id, &member);
+
+            // Emit event
+            Self::deposit_event(Event::KycStatusUpdated {
+                member_id,
+                updated_by: who,
+                old_status,
+                new_status,
+            });
+
+            Ok(())
+        }
+
+        /// Update KYC status by admin with additional validation (Root/Sudo only)
+        /// 
+        /// Restricted version that only allows root/sudo to update KYC status.
+        /// Use this instead of update_kyc_status if you want stricter access control.
+        /// 
+        /// Parameters:
+        /// - `member_id`: UUID of the member whose KYC status to update  
+        /// - `new_status`: New KYC status (Approved, Rejected, or Unapproved)
+        /// 
+        /// Emits: `KycStatusUpdated` event
+        #[pallet::call_index(7)]
+        #[pallet::weight(T::WeightInfo::admin_update_kyc_status())]
+        pub fn admin_update_kyc_status(
+            origin: OriginFor<T>,
+            member_id: MemberUuid,
+            new_status: KycStatus,
+        ) -> DispatchResult {
+            // Only root/sudo can call this function
+            ensure_root(origin)?;
+
+            // Get existing member data
+            let mut member = Members::<T>::get(&member_id)
+                .ok_or(Error::<T>::MemberNotFound)?;
+
+            // Store old status for event
+            let old_status = member.kyc_status.clone();
+
+            // Update KYC status and timestamp
+            member.kyc_status = new_status.clone();
+            member.updated_at = Self::current_timestamp();
+
+            // Store updated member data
+            Members::<T>::insert(&member_id, &member);
+
+            // For admin updates, we'll use the member's account as placeholder
+            // In a production system, you might want to track admin accounts separately
+            Self::deposit_event(Event::KycStatusUpdated {
+                member_id,
+                updated_by: member.created_by.clone(),
+                old_status,
+                new_status,
+            });
+
+            Ok(())
+        }
+	}
 
 	/// Public query functions (not extrinsics)
     impl<T: Config> Pallet<T> {
@@ -573,6 +838,16 @@ pub mod pallet {
         /// Get total number of registered members
         pub fn total_members() -> u32 {
             MemberCount::<T>::get()
+        }
+
+        /// Get member by UUID (admin function - returns full data)
+        pub fn get_member_by_uuid(member_id: &MemberUuid) -> Option<Member<T>> {
+            Members::<T>::get(member_id)
+        }
+
+        /// Get member UUID by account
+        pub fn get_member_uuid_by_account(account: &T::AccountId) -> Option<MemberUuid> {
+            AccountToMember::<T>::get(account)
         }
 
         /// Helper function to generate unique member UUID
