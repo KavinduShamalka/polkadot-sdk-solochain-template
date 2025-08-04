@@ -332,12 +332,13 @@ pub mod pallet {
 			}
 		}
 
-		/// Register a new member profile
+        /// Register a new member profile
         /// 
         /// This function creates a new member profile owned by the calling account.
         /// Each account can only have one member profile.
         /// 
         /// Parameters:
+        /// - `member_type`: Type of membership (UniversityStudent, SchoolStudent, Professional, General)
         /// - `first_name`: Member's first name
         /// - `last_name`: Member's last name  
         /// - `date_of_birth`: Date in YYYY-MM-DD format (e.g., "1998-08-20")
@@ -350,9 +351,10 @@ pub mod pallet {
         #[pallet::weight(T::WeightInfo::register_member())]
         pub fn register_member(
             origin: OriginFor<T>,
+            member_type: MemberType,
             first_name: Vec<u8>,
             last_name: Vec<u8>,
-            date_of_birth: Vec<u8>, // Changed to Vec<u8> for string format
+            date_of_birth: Vec<u8>,
             email: Vec<u8>,
             address: Vec<u8>,
             mobile: Vec<u8>,
@@ -399,10 +401,10 @@ pub mod pallet {
             let current_time = Self::current_timestamp();
             let member_id = Self::generate_member_uuid(&who, current_time);
 
-            // Create member profile
+            // Create member profile with specified member type
             let member = Member {
                 member_id,
-                member_type: MemberType::General,
+                member_type, // Use the provided member_type instead of defaulting to General
                 first_name: bounded_first_name,
                 last_name: bounded_last_name,
                 date_of_birth: bounded_date_of_birth,
@@ -482,13 +484,13 @@ pub mod pallet {
         #[pallet::weight(T::WeightInfo::update_member())]
         pub fn update_member(
             origin: OriginFor<T>,
+            member_type: Option<MemberType>,
             first_name: Option<Vec<u8>>,
             last_name: Option<Vec<u8>>,
-            date_of_birth: Option<Vec<u8>>, // Changed to Vec<u8> for string format
+            date_of_birth: Option<Vec<u8>>,
             email: Option<Vec<u8>>,
             address: Option<Vec<u8>>,
             mobile: Option<Vec<u8>>,
-            member_type: Option<MemberType>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -506,6 +508,14 @@ pub mod pallet {
             let mut profile_changed = false;
             let old_email = member.email.clone();
             let mut new_email = member.email.clone();
+
+            // Update member type if provided
+            if let Some(mt) = member_type {
+                if mt != member.member_type {
+                    member.member_type = mt;
+                    profile_changed = true;
+                }
+            }
 
             // Update first name if provided
             if let Some(name) = first_name {
@@ -584,14 +594,6 @@ pub mod pallet {
                     mob.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
                 if bounded_mobile != member.mobile {
                     member.mobile = bounded_mobile;
-                    profile_changed = true;
-                }
-            }
-
-            // Update member type if provided
-            if let Some(mt) = member_type {
-                if mt != member.member_type {
-                    member.member_type = mt;
                     profile_changed = true;
                 }
             }
