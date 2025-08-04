@@ -807,7 +807,7 @@ pub mod pallet {
         }
 	}
 
-	/// Public query functions (not extrinsics)
+	//// Public query functions (not extrinsics)
     impl<T: Config> Pallet<T> {
         /// Get member profile by account (only returns data if caller owns the profile)
         pub fn get_member_by_account(account: &T::AccountId) -> Option<Member<T>> {
