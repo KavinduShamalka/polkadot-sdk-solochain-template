@@ -861,7 +861,7 @@ pub mod pallet {
             BlakeTwo256::hash(&data)
         }
 
-        /// Helper function to get current timestamp
+        //// Helper function to get current timestamp
         fn current_timestamp() -> u64 {
             // In a real implementation, you would get this from pallet_timestamp
             // For now, using block number as a simple timestamp
