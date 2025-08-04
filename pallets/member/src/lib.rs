@@ -5,7 +5,10 @@
 //! ## Overview
 //!
 //! This pallet provides:
-//! - Member profile registration and management
+//! - Member profile registration and management with validation
+//! - Email format validation (RFC 5322 basic validation)
+//! - Mobile number validation (international format with +)
+//! - Date format validation (YYYY-MM-DD format)
 //! - Profile updates with automatic KYC status reset
 //! - KYC document submission via IPFS hashes
 //! - KYC status management with admin controls
@@ -131,7 +134,7 @@ pub mod pallet {
         /// Personal Information
         pub first_name: BoundedVec<u8, T::MaxFirstNameLength>,
         pub last_name: BoundedVec<u8, T::MaxLastNameLength>,
-        pub date_of_birth: u64, // Unix timestamp
+        pub date_of_birth: BoundedVec<u8, ConstU32<10>>, // Changed to store as string format YYYY-MM-DD
         
         /// Contact Information
         pub email: BoundedVec<u8, T::MaxEmailLength>,
@@ -191,15 +194,6 @@ pub mod pallet {
     >;
 
 	/// Events that functions in this pallet can emit.
-	///
-	/// Events are a simple means of indicating to the outside world (such as dApps, chain explorers
-	/// or other users) that some notable update in the runtime has occurred. In a FRAME pallet, the
-	/// documentation for each event field and its parameters is added to a node's metadata so it
-	/// can be used by external interfaces or tools.
-	///
-	///	The `generate_deposit` macro generates a function on `Pallet` called `deposit_event` which
-	/// will convert the event type of your pallet into `RuntimeEvent` (declared in the pallet's
-	/// [`Config`] trait) and deposit it using [`frame_system::Pallet::deposit_event`].
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -249,7 +243,7 @@ pub mod pallet {
 			// Member data as separate fields (this avoids trait bound issues)
 			first_name: BoundedVec<u8, T::MaxFirstNameLength>,
 			last_name: BoundedVec<u8, T::MaxLastNameLength>,
-			date_of_birth: u64,
+			date_of_birth: BoundedVec<u8, ConstU32<10>>, // Updated to string format
 			email: BoundedVec<u8, T::MaxEmailLength>,
 			address: BoundedVec<u8, T::MaxAddressLength>,
 			mobile: BoundedVec<u8, T::MaxMobileLength>,
@@ -262,13 +256,6 @@ pub mod pallet {
 	}
 
 	/// Errors that can be returned by this pallet.
-	///
-	/// Errors tell users that something went wrong so it's important that their naming is
-	/// informative. Similar to events, error documentation is added to a node's metadata so it's
-	/// equally important that they have helpful documentation associated with them.
-	///
-	/// This type of runtime error can be up to 4 bytes in size should you want to return additional
-	/// information.
 	#[pallet::error]
 	pub enum Error<T> {
 		/// The value retrieved was `None` as no value was previously set.
@@ -295,27 +282,19 @@ pub mod pallet {
         EmailUnchanged,
         /// Only admin/sudo can update KYC status
         UnauthorizedKycUpdate,
+        /// Invalid email format
+        InvalidEmailFormat,
+        /// Invalid mobile number format
+        InvalidMobileFormat,
+        /// Invalid date format - must be YYYY-MM-DD
+        InvalidDateFormat,
 	}
 
 	/// The pallet's dispatchable functions ([`Call`]s).
-	///
-	/// Dispatchable functions allows users to interact with the pallet and invoke state changes.
-	/// These functions materialize as "extrinsics", which are often compared to transactions.
-	/// They must always return a `DispatchResult` and be annotated with a weight and call index.
-	///
-	/// The [`call_index`] macro is used to explicitly
-	/// define an index for calls in the [`Call`] enum. This is useful for pallets that may
-	/// introduce new dispatchables over time. If the order of a dispatchable changes, its index
-	/// will also change which will break backwards compatibility.
-	///
-	/// The [`weight`] macro is used to assign a weight to each call.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		/// An example dispatchable that takes a single u32 value as a parameter, writes the value
 		/// to storage and emits an event.
-		///
-		/// It checks that the _origin_ for this call is _Signed_ and returns a dispatch
-		/// error if it isn't. Learn more about origins here: <https://docs.substrate.io/build/origins/>
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::do_something())]
 		pub fn do_something(origin: OriginFor<T>, something: u32) -> DispatchResult {
@@ -333,18 +312,6 @@ pub mod pallet {
 		}
 
 		/// An example dispatchable that may throw a custom error.
-		///
-		/// It checks that the caller is a signed origin and reads the current value from the
-		/// `Something` storage item. If a current value exists, it is incremented by 1 and then
-		/// written back to storage.
-		///
-		/// ## Errors
-		///
-		/// The function will return an error under the following conditions:
-		///
-		/// - If no value has been set ([`Error::NoneValue`])
-		/// - If incrementing the value in storage causes an arithmetic overflow
-		///   ([`Error::StorageOverflow`])
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::cause_error())]
 		pub fn cause_error(origin: OriginFor<T>) -> DispatchResult {
@@ -373,10 +340,10 @@ pub mod pallet {
         /// Parameters:
         /// - `first_name`: Member's first name
         /// - `last_name`: Member's last name  
-        /// - `date_of_birth`: Unix timestamp of birth date
-        /// - `email`: Email address (must be unique)
+        /// - `date_of_birth`: Date in YYYY-MM-DD format (e.g., "1998-08-20")
+        /// - `email`: Email address (must be valid format and unique)
         /// - `address`: Physical address
-        /// - `mobile`: Mobile phone number
+        /// - `mobile`: Mobile phone number (7-15 digits, + prefix optional)
         /// 
         /// Emits: `MemberRegistered` event
         #[pallet::call_index(2)]
@@ -385,7 +352,7 @@ pub mod pallet {
             origin: OriginFor<T>,
             first_name: Vec<u8>,
             last_name: Vec<u8>,
-            date_of_birth: u64,
+            date_of_birth: Vec<u8>, // Changed to Vec<u8> for string format
             email: Vec<u8>,
             address: Vec<u8>,
             mobile: Vec<u8>,
@@ -399,11 +366,22 @@ pub mod pallet {
                 Error::<T>::MemberAlreadyExists
             );
 
+            // Validate email format before proceeding
+            Self::validate_email(&email)?;
+
+            // Validate mobile number format
+            Self::validate_mobile(&mobile)?;
+
+            // Validate date format
+            Self::validate_date(&date_of_birth)?;
+
             // Convert to bounded vectors with length validation
             let bounded_first_name: BoundedVec<u8, T::MaxFirstNameLength> = 
                 first_name.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
             let bounded_last_name: BoundedVec<u8, T::MaxLastNameLength> = 
                 last_name.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
+            let bounded_date_of_birth: BoundedVec<u8, ConstU32<10>> = 
+                date_of_birth.try_into().map_err(|_| Error::<T>::InvalidDateFormat)?;
             let bounded_email: BoundedVec<u8, T::MaxEmailLength> = 
                 email.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
             let bounded_address: BoundedVec<u8, T::MaxAddressLength> = 
@@ -427,7 +405,7 @@ pub mod pallet {
                 member_type: MemberType::General,
                 first_name: bounded_first_name,
                 last_name: bounded_last_name,
-                date_of_birth,
+                date_of_birth: bounded_date_of_birth,
                 email: bounded_email.clone(),
                 address: bounded_address,
                 mobile: bounded_mobile,
@@ -462,14 +440,6 @@ pub mod pallet {
         }
 
 		/// Get member profile information with full data
-		/// 
-		/// Returns the complete member profile data in the event fields.
-		/// Only the owner can access their own member data.
-		/// 
-		/// Returns: Success confirmation
-		/// Data: Available in MemberDataRetrieved event fields
-		/// 
-		/// Emits: `MemberDataRetrieved` event with all member fields
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::get_member())]
 		pub fn get_member(origin: OriginFor<T>) -> DispatchResult {
@@ -508,27 +478,13 @@ pub mod pallet {
 		}
 
         /// Update member profile information
-        /// 
-        /// Allows the member owner to update their profile information.
-        /// When any field is updated, KYC status is automatically reset to Unapproved.
-        /// 
-        /// Parameters:
-        /// - `first_name`: Updated first name (optional)
-        /// - `last_name`: Updated last name (optional)
-        /// - `date_of_birth`: Updated birth date (optional)
-        /// - `email`: Updated email address (optional, must be unique)
-        /// - `address`: Updated address (optional)
-        /// - `mobile`: Updated mobile number (optional)
-        /// - `member_type`: Updated member type (optional)
-        /// 
-        /// Emits: `MemberUpdated` event
         #[pallet::call_index(4)]
         #[pallet::weight(T::WeightInfo::update_member())]
         pub fn update_member(
             origin: OriginFor<T>,
             first_name: Option<Vec<u8>>,
             last_name: Option<Vec<u8>>,
-            date_of_birth: Option<u64>,
+            date_of_birth: Option<Vec<u8>>, // Changed to Vec<u8> for string format
             email: Option<Vec<u8>>,
             address: Option<Vec<u8>>,
             mobile: Option<Vec<u8>>,
@@ -573,14 +529,22 @@ pub mod pallet {
 
             // Update date of birth if provided
             if let Some(dob) = date_of_birth {
-                if dob != member.date_of_birth {
-                    member.date_of_birth = dob;
+                // Validate date format
+                Self::validate_date(&dob)?;
+                
+                let bounded_dob: BoundedVec<u8, ConstU32<10>> = 
+                    dob.try_into().map_err(|_| Error::<T>::InvalidDateFormat)?;
+                if bounded_dob != member.date_of_birth {
+                    member.date_of_birth = bounded_dob;
                     profile_changed = true;
                 }
             }
 
             // Update email if provided
             if let Some(new_email_vec) = email {
+                // Validate email format
+                Self::validate_email(&new_email_vec)?;
+                
                 let bounded_email: BoundedVec<u8, T::MaxEmailLength> = 
                     new_email_vec.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
                 
@@ -613,6 +577,9 @@ pub mod pallet {
 
             // Update mobile if provided
             if let Some(mob) = mobile {
+                // Validate mobile format
+                Self::validate_mobile(&mob)?;
+                
                 let bounded_mobile: BoundedVec<u8, T::MaxMobileLength> = 
                     mob.try_into().map_err(|_| Error::<T>::InvalidMemberData)?;
                 if bounded_mobile != member.mobile {
@@ -657,15 +624,6 @@ pub mod pallet {
         }
 
         /// Submit KYC documents
-        /// 
-        /// Allows a member to submit KYC documents by providing the IPFS hash.
-        /// This also updates the photo hash if provided.
-        /// 
-        /// Parameters:
-        /// - `kyc_hash`: IPFS hash of KYC documents
-        /// - `photo_hash`: Optional IPFS hash of member photo
-        /// 
-        /// Emits: `KycSubmitted` event
         #[pallet::call_index(5)]
         #[pallet::weight(T::WeightInfo::submit_kyc())]
         pub fn submit_kyc(
@@ -707,15 +665,6 @@ pub mod pallet {
         }
 
         /// Update KYC status (Admin/Sudo only)
-        /// 
-        /// Allows authorized accounts (typically admin/sudo) to update the KYC status
-        /// of a member after reviewing their submitted documents.
-        /// 
-        /// Parameters:
-        /// - `member_id`: UUID of the member whose KYC status to update
-        /// - `new_status`: New KYC status (Approved, Rejected, or Unapproved)
-        /// 
-        /// Emits: `KycStatusUpdated` event
         #[pallet::call_index(6)]
         #[pallet::weight(T::WeightInfo::update_kyc_status())]
         pub fn update_kyc_status(
@@ -723,9 +672,6 @@ pub mod pallet {
             member_id: MemberUuid,
             new_status: KycStatus,
         ) -> DispatchResult {
-            // For now, we'll allow any signed origin to update KYC status
-            // In production, you should restrict this to admin/sudo only
-            // You can use: ensure_root(origin)?; for sudo only
             let who = ensure_signed(origin)?;
 
             // Get existing member data
@@ -734,13 +680,6 @@ pub mod pallet {
 
             // Store old status for event
             let old_status = member.kyc_status.clone();
-
-            // Validate status transition (optional business logic)
-            // You can add custom validation rules here
-            match (&old_status, &new_status) {
-                // Allow any transition for now
-                _ => {},
-            }
 
             // Update KYC status and timestamp
             member.kyc_status = new_status.clone();
@@ -761,15 +700,6 @@ pub mod pallet {
         }
 
         /// Update KYC status by admin with additional validation (Root/Sudo only)
-        /// 
-        /// Restricted version that only allows root/sudo to update KYC status.
-        /// Use this instead of update_kyc_status if you want stricter access control.
-        /// 
-        /// Parameters:
-        /// - `member_id`: UUID of the member whose KYC status to update  
-        /// - `new_status`: New KYC status (Approved, Rejected, or Unapproved)
-        /// 
-        /// Emits: `KycStatusUpdated` event
         #[pallet::call_index(7)]
         #[pallet::weight(T::WeightInfo::admin_update_kyc_status())]
         pub fn admin_update_kyc_status(
@@ -795,7 +725,6 @@ pub mod pallet {
             Members::<T>::insert(&member_id, &member);
 
             // For admin updates, we'll use the member's account as placeholder
-            // In a production system, you might want to track admin accounts separately
             Self::deposit_event(Event::KycStatusUpdated {
                 member_id,
                 updated_by: member.created_by.clone(),
@@ -807,8 +736,133 @@ pub mod pallet {
         }
 	}
 
-	//// Public query functions (not extrinsics)
+	//// Public query functions and validation helpers
     impl<T: Config> Pallet<T> {
+        /// Validate email format (basic RFC 5322 validation)
+        fn validate_email(email: &[u8]) -> DispatchResult {
+            let email_str = core::str::from_utf8(email)
+                .map_err(|_| Error::<T>::InvalidEmailFormat)?;
+            
+            // Basic email validation
+            // Must contain exactly one @ symbol
+            let at_count = email_str.matches('@').count();
+            ensure!(at_count == 1, Error::<T>::InvalidEmailFormat);
+            
+            // Split into local and domain parts
+            let parts: Vec<&str> = email_str.split('@').collect();
+            ensure!(parts.len() == 2, Error::<T>::InvalidEmailFormat);
+            
+            let local = parts[0];
+            let domain = parts[1];
+            
+            // Local part validation
+            ensure!(!local.is_empty() && local.len() <= 64, Error::<T>::InvalidEmailFormat);
+            ensure!(!local.starts_with('.') && !local.ends_with('.'), Error::<T>::InvalidEmailFormat);
+            ensure!(!local.contains(".."), Error::<T>::InvalidEmailFormat);
+            
+            // Domain part validation
+            ensure!(!domain.is_empty() && domain.len() <= 253, Error::<T>::InvalidEmailFormat);
+            ensure!(domain.contains('.'), Error::<T>::InvalidEmailFormat);
+            ensure!(!domain.starts_with('.') && !domain.ends_with('.'), Error::<T>::InvalidEmailFormat);
+            ensure!(!domain.starts_with('-') && !domain.ends_with('-'), Error::<T>::InvalidEmailFormat);
+            
+            // Check for valid characters in local part
+            for c in local.chars() {
+                ensure!(
+                    c.is_ascii_alphanumeric() || 
+                    c == '.' || c == '_' || c == '-' || c == '+',
+                    Error::<T>::InvalidEmailFormat
+                );
+            }
+            
+            // Check for valid characters in domain part
+            for c in domain.chars() {
+                ensure!(
+                    c.is_ascii_alphanumeric() || c == '.' || c == '-',
+                    Error::<T>::InvalidEmailFormat
+                );
+            }
+            
+            Ok(())
+        }
+
+        /// Validate mobile number format (flexible format - with or without + prefix)
+        fn validate_mobile(mobile: &[u8]) -> DispatchResult {
+            let mobile_str = core::str::from_utf8(mobile)
+                .map_err(|_| Error::<T>::InvalidMobileFormat)?;
+            
+            // Handle both formats: with or without + prefix
+            let number_part = if mobile_str.starts_with('+') {
+                &mobile_str[1..]  // Remove + prefix if present
+            } else {
+                mobile_str        // Use as-is if no + prefix
+            };
+            
+            // Must be between 7 and 15 digits
+            ensure!(number_part.len() >= 7 && number_part.len() <= 15, Error::<T>::InvalidMobileFormat);
+            
+            // All characters must be digits
+            for c in number_part.chars() {
+                ensure!(c.is_ascii_digit(), Error::<T>::InvalidMobileFormat);
+            }
+            
+            Ok(())
+        }
+
+        /// Validate date format (YYYY-MM-DD)
+        fn validate_date(date: &[u8]) -> DispatchResult {
+            let date_str = core::str::from_utf8(date)
+                .map_err(|_| Error::<T>::InvalidDateFormat)?;
+            
+            // Must be exactly 10 characters
+            ensure!(date_str.len() == 10, Error::<T>::InvalidDateFormat);
+            
+            // Check format: YYYY-MM-DD
+            let chars: Vec<char> = date_str.chars().collect();
+            
+            // Check positions of dashes
+            ensure!(chars[4] == '-' && chars[7] == '-', Error::<T>::InvalidDateFormat);
+            
+            // Check that year, month, day parts are all digits
+            for i in 0..4 {
+                ensure!(chars[i].is_ascii_digit(), Error::<T>::InvalidDateFormat);
+            }
+            for i in 5..7 {
+                ensure!(chars[i].is_ascii_digit(), Error::<T>::InvalidDateFormat);
+            }
+            for i in 8..10 {
+                ensure!(chars[i].is_ascii_digit(), Error::<T>::InvalidDateFormat);
+            }
+            
+            // Extract year, month, day and validate ranges
+            let year_str = &date_str[0..4];
+            let month_str = &date_str[5..7];
+            let day_str = &date_str[8..10];
+            
+            // Parse year (basic range check: 1900-2100)
+            if let Ok(year) = year_str.parse::<u32>() {
+                ensure!(year >= 1900 && year <= 2100, Error::<T>::InvalidDateFormat);
+            } else {
+                return Err(Error::<T>::InvalidDateFormat.into());
+            }
+            
+            // Parse month (1-12)
+            if let Ok(month) = month_str.parse::<u32>() {
+                ensure!(month >= 1 && month <= 12, Error::<T>::InvalidDateFormat);
+            } else {
+                return Err(Error::<T>::InvalidDateFormat.into());
+            }
+            
+            // Parse day (1-31, basic validation)
+            if let Ok(day) = day_str.parse::<u32>() {
+                ensure!(day >= 1 && day <= 31, Error::<T>::InvalidDateFormat);
+            } else {
+                return Err(Error::<T>::InvalidDateFormat.into());
+            }
+            
+            Ok(())
+        }
+
         /// Get member profile by account (only returns data if caller owns the profile)
         pub fn get_member_by_account(account: &T::AccountId) -> Option<Member<T>> {
             // Get member UUID for this account
@@ -861,7 +915,7 @@ pub mod pallet {
             BlakeTwo256::hash(&data)
         }
 
-        //// Helper function to get current timestamp
+        /// Helper function to get current timestamp
         fn current_timestamp() -> u64 {
             // In a real implementation, you would get this from pallet_timestamp
             // For now, using block number as a simple timestamp
